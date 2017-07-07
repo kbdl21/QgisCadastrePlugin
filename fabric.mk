@@ -24,5 +24,5 @@ build/cadastre:
 package: build/cadastre
 	@echo "Building package qgis_cadastre"
 	@cp -rLp $(FILES) build/cadastre/
-	$(FABRIC) -f $(LIZFABFILE) package:qgis_cadastre,versiontag=$(VERSION),files=cadastre,directory=./build
+	$(FABRIC) package:qgis_cadastre,versiontag=$(VERSION),files=cadastre,directory=./build
 
