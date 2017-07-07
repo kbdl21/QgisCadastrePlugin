@@ -41,4 +41,4 @@ nosetests.xml
 *.swp
 *.pyc
 *.DS_Store
-
+.idea
