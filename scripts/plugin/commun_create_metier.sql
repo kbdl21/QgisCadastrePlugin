@@ -18,7 +18,7 @@ CREATE TABLE parcelle (
     dsrpar text,
     dnupro text,
     comptecommunal text,
-    jdatat date,
+    jdatat text,
     dreflf text,
     gpdl text,
     cprsecr text,
@@ -50,6 +50,7 @@ CREATE TABLE parcelle (
     dnuplam text,
     parcellefiliation text,
     type_filiation text,
+    ccoifp integer,
     lot text
 );
 
@@ -85,8 +86,9 @@ CREATE TABLE suf (
     rclsi text,
     gnidom text,
     topja text,
-    datja date,
+    datja text,
     postel text,
+    ccortar integer,
     lot text
 );
 
@@ -187,7 +189,7 @@ CREATE TABLE local10 (
     dsrpar text,
     dnupro text,
     comptecommunal text,
-    jdatat date,
+    jdatat text,
     dnufnl text,
     ccoeva text,
     ccitlv text,
@@ -211,7 +213,7 @@ CREATE TABLE local10 (
     hlmsem text,
     postel text,
     dnatcg text,
-    jdatcgl date,
+    jdatcgl text,
     dnutbx text,
     dvltla text,
     janloc text,
@@ -223,6 +225,8 @@ CREATE TABLE local10 (
     jrtabt text,
     jacloc text,
     cconac text,
+    toprev text,
+    ccoifp integer,
     lot text
 );
 
@@ -263,6 +267,13 @@ CREATE TABLE pev (
     dcralca text,
     topcn integer,
     tpevtieom integer,
+    ccocac text,
+    dnutrf text,
+    dcfloc integer,
+    ccortar integer,
+    ccorvl text,
+    dtaurv integer,
+    dcmloc integer,
     lot text
 );
 
@@ -292,6 +303,7 @@ CREATE TABLE pevexoneration (
     fcexb2 integer,
     fcexba2 integer,
     rcexba2 integer,
+    valplaf text,
     lot text
 );
 
@@ -396,6 +408,34 @@ CREATE TABLE pevprofessionnelle (
     vsurzt integer,
     vsurb1 text,
     vsurb2 text,
+    dsupot text,
+    dsup1 text,
+    dsup2 text,
+    dsup3 text,
+    dsupk1 text,
+    dsupk2 text,
+    lot text
+);
+
+CREATE TABLE pevlissage (
+    pevlissage text,
+    annee  text,
+    ccodep text,
+    ccodir text,
+    ccocom text,
+    invar  text,
+    dnupev text,
+    pev    text,
+    mlbcom integer,
+    mlbsyn integer,
+    mlbcu integer,
+    mlbdep integer,
+    mlbts1 integer,
+    mlbts2 integer,
+    mlbtas integer,
+    mlbgem integer,
+    mlbtom integer,
+    tbfpas integer,
     lot text
 );
 
@@ -474,7 +514,7 @@ CREATE TABLE proprietaire (
     dqualp text,
     dnomlp text,
     dprnlp text,
-    jdatnss date,
+    jdatnss text,
     dldnss text,
     epxnee text,
     dnomcp text,
@@ -488,7 +528,7 @@ CREATE TABLE proprietaire (
     dsiren text,
     ccmm text,
     topja text,
-    datja date,
+    datja text,
     anospi text,
     cblpmo text,
     gtodge text,
@@ -575,7 +615,7 @@ CREATE TABLE lots (
     dnumql integer,
     ddenql integer,
     dfilot text,
-    datact date,
+    datact text,
     dnuprol text,
     comptecommunal text,
     dreflf text,
@@ -686,10 +726,14 @@ CREATE TABLE ccoplc (ccoplc text primary key, ccoplc_lib text);
 CREATE TABLE cconlc (cconlc text primary key, cconlc_lib text);
 CREATE TABLE top48a (top48a text primary key, top48a_lib text);
 CREATE TABLE dnatlc (dnatlc text primary key, dnatlc_lib text);
+CREATE TABLE dnatcg (dnatcg text primary key, dnatcg_lib text);
+CREATE TABLE gimtom (gimtom text primary key, gimtom_lib text);
 CREATE TABLE hlmsem (hlmsem text primary key, hlmsem_lib text);
 CREATE TABLE ccoaff (ccoaff text primary key, ccoaff_lib text);
 CREATE TABLE gnexpl (gnexpl text primary key, gnexpl_lib text);
+CREATE TABLE cbtabt (cbtabt text primary key, cbtabt_lib text);
 CREATE TABLE gnextl (gnextl text primary key, gnextl_lib text);
+CREATE TABLE ccthp (ccthp text primary key, ccthp_lib text);
 CREATE TABLE cconad (cconad text primary key, cconad_lib text);
 CREATE TABLE ctpdl (ctpdl text primary key, ctpdl_lib text);
 CREATE TABLE cconlo (cconlo text primary key, cconlo_lib text);
@@ -710,6 +754,7 @@ CREATE TABLE annul (annul text primary key, annul_lib text);
 CREATE TABLE typvoi (typvoi text primary key, typvoi_lib text);
 CREATE TABLE indldnbat (indldnbat text primary key, indldnbat_lib text);
 CREATE TABLE dformjur (dformjur text primary key, formjur text, libformjur text);
+CREATE TABLE ccocac (ccocac text primary key, ccocac_lib text);
 
 CREATE TABLE geo_commune
 (
@@ -1143,7 +1188,7 @@ COMMENT ON COLUMN parcelle.ccopre IS 'Préfixe de section ou quartier servi pour
 COMMENT ON COLUMN parcelle.ccosec IS 'Section cadastrale - ';
 COMMENT ON COLUMN parcelle.dnupla IS 'Numéro de plan - ';
 COMMENT ON COLUMN parcelle.dcntpa IS 'Contenance de la parcelle - en centiares';
-COMMENT ON COLUMN parcelle.dsrpar IS 'Lettre de série-role - ';
+COMMENT ON COLUMN parcelle.dsrpar IS 'Lettre de série-role - INDISPONIBLE depuis 2018';
 COMMENT ON COLUMN parcelle.dnupro IS 'Compte communal du propriétaire de la parcelle - ';
 COMMENT ON COLUMN parcelle.jdatat IS 'Date de l acte - jjmmaaaa';
 COMMENT ON COLUMN parcelle.dreflf IS 'Référence au Livre Foncier en Alsace-Moselle - ';
@@ -1174,6 +1219,7 @@ COMMENT ON COLUMN parcelle.ccosecm IS 'Code section de la parcelle mère';
 COMMENT ON COLUMN parcelle.dnuplam IS 'Numéro de plan de la parcelle mère';
 COMMENT ON COLUMN parcelle.parcellefiliation IS 'Parcelle en filiation';
 COMMENT ON COLUMN parcelle.type_filiation IS 'Type de filiation (D, R, T ou blanc)';
+COMMENT ON COLUMN parcelle.ccoifp IS 'Code IFP';
 
 COMMENT ON TABLE suf IS 'Article descriptif de suf';
 COMMENT ON COLUMN suf.ccodep IS 'Code département - ';
@@ -1204,6 +1250,7 @@ COMMENT ON COLUMN suf.gnidom IS 'Indicateur de suf non imposable - * ou blanc';
 COMMENT ON COLUMN suf.topja IS 'Indicateur jeune agriculteur - J ou blanc';
 COMMENT ON COLUMN suf.datja IS 'Date d’installation jeune agriculteur - peut être servie si topja = J';
 COMMENT ON COLUMN suf.postel IS 'Indicateur de bien appartenant à la Poste - X ou blanc';
+COMMENT ON COLUMN suf.ccortar IS 'Code commune origine du tarif';
 COMMENT ON COLUMN suf.drgpos is 'Top terrain constructible Liaison avec un lot de pdl - « 0 » ou « 9 » ';
 
 COMMENT ON TABLE sufexoneration IS 'Article exonération de suf';
@@ -1270,7 +1317,7 @@ COMMENT ON COLUMN local10.ccodir IS 'code direction - ';
 COMMENT ON COLUMN local10.ccocom IS 'code commune INSEE - ';
 COMMENT ON COLUMN local10.invar IS 'numéro invariant - ';
 COMMENT ON COLUMN local10.gpdl IS 'indicateur d’appartenance à un lot de pdl - 1 = oui, sinon 0';
-COMMENT ON COLUMN local10.dsrpar IS 'lettre de série rôle - ';
+COMMENT ON COLUMN local10.dsrpar IS 'lettre de série rôle - INDISPONIBLE';
 COMMENT ON COLUMN local10.dnupro IS 'compte communal de propriétaire - ';
 COMMENT ON COLUMN local10.jdatat IS 'date d’acte de mutation - jjmmaaaa';
 COMMENT ON COLUMN local10.dnufnl IS 'compte communal de fonctionnaire logé - redevable de la tom';
@@ -1308,6 +1355,9 @@ COMMENT ON COLUMN local10.jacloc IS 'Année d’achèvement du local - INDISPONI
 COMMENT ON COLUMN local10.cconac IS 'Code NACE pour les locaux professionnels';
 COMMENT ON COLUMN local10.dnatcg IS 'Code nature du changement d’évaluation (depuis 2013)';
 COMMENT ON COLUMN local10.jdatcgl IS 'Date changement évaluation - JJMMSSAA (Depuis 2013)';
+COMMENT ON COLUMN local10.toprev IS 'Top local révisé. 0 si non révisé, 1 si révisé.';
+COMMENT ON COLUMN local10.ccoifp IS 'Code IFP';
+
 COMMENT ON TABLE pev IS 'Article descriptif de pev';
 COMMENT ON COLUMN pev.ccodep IS 'Code département - ';
 COMMENT ON COLUMN pev.ccodir IS 'Code direction - ';
@@ -1342,6 +1392,15 @@ COMMENT ON COLUMN pev.dcsglca IS 'Coefficient de situation générale';
 COMMENT ON COLUMN pev.dcralca IS 'Correctif d’ascenseur';
 COMMENT ON COLUMN pev.topcn IS 'Top construction nouvelle (à partir de 2013)';
 COMMENT ON COLUMN pev.tpevtieom IS 'Top Local passible de la TEOM (à partir de 2013)';
+COMMENT ON COLUMN pev.ccocac IS 'Code catégorie du local';
+COMMENT ON COLUMN pev.dnutrf IS 'Secteur révisé';
+COMMENT ON COLUMN pev.dcfloc IS 'Coefficient de localisation';
+COMMENT ON COLUMN pev.ccortar IS 'Code commune origine du tarif';
+COMMENT ON COLUMN pev.ccorvl IS 'Code réduction du local';
+COMMENT ON COLUMN pev.dtaurv IS 'Taux de réduction';
+COMMENT ON COLUMN pev.dcmloc IS 'Coefficient de modulation du local';
+
+
 COMMENT ON TABLE pevexoneration IS 'Article exonération de pev';
 COMMENT ON COLUMN pevexoneration.ccodep IS 'Code département - ';
 COMMENT ON COLUMN pevexoneration.ccodir IS 'Code direction - ';
@@ -1365,6 +1424,8 @@ COMMENT ON COLUMN pevexoneration.dvldif2a IS 'Montant de VL exonérée (valeur d
 COMMENT ON COLUMN pevexoneration.fcexb2 IS 'Fraction de VL exonérée (valeur 70) - ';
 COMMENT ON COLUMN pevexoneration.fcexba2 IS 'Fraction de VL exonérée (valeur de l’année) - ';
 COMMENT ON COLUMN pevexoneration.rcexba2 IS 'Revenu cadastral exonéré (valeur de l’année) - ';
+COMMENT ON COLUMN pevexoneration.valplaf IS 'Montant du planchonnement sur la base exonérée neutralisée';
+
 COMMENT ON TABLE pevtaxation IS 'Article taxation de pev';
 COMMENT ON COLUMN pevtaxation.ccodep IS 'Code département - ';
 COMMENT ON COLUMN pevtaxation.ccodir IS 'Code direction - ';
@@ -1452,7 +1513,38 @@ COMMENT ON COLUMN pevprofessionnelle.vsurz3 IS 'Surface réelle totale zone 3 - 
 COMMENT ON COLUMN pevprofessionnelle.vsurzt IS 'Surface réelle totale - ';
 COMMENT ON COLUMN pevprofessionnelle.vsurb1 IS 'surface réelle des bureaux 1 - INDISPONIBLE';
 COMMENT ON COLUMN pevprofessionnelle.vsurb2 IS 'surface réelle des bureaux 2 - INDISPONIBLE';
-COMMENT ON TABLE pevdependances IS 'Article descriptif de dépendance';
+
+COMMENT ON COLUMN pevprofessionnelle.dsupot IS 'Surface pondérée';
+COMMENT ON COLUMN pevprofessionnelle.dsup1 IS 'Surface des parties principales';
+COMMENT ON COLUMN pevprofessionnelle.dsup2 IS 'Surface des parties secondaires couvertes';
+COMMENT ON COLUMN pevprofessionnelle.dsup3 IS 'Surface des parties secondaires non couvertes';
+COMMENT ON COLUMN pevprofessionnelle.dsupk1 IS 'Surface des stationnements couverts';
+COMMENT ON COLUMN pevprofessionnelle.dsupk2 IS 'Surface des stationnements non couverts';
+
+COMMENT ON TABLE pevlissage IS 'Descriptif des quotes-parts de lissage (locaux révisés). Bati enregistrement 52';
+COMMENT ON COLUMN pevlissage.ccodep IS 'Code du département';
+COMMENT ON COLUMN pevlissage.ccodir IS 'Code de direction';
+COMMENT ON COLUMN pevlissage.ccocom IS 'Code commune INSEE';
+COMMENT ON COLUMN pevlissage.invar  IS 'Numéro invariant';
+COMMENT ON COLUMN pevlissage.dnupev IS 'Numéro de PEV';
+COMMENT ON COLUMN pevlissage.pev    IS 'Code unique de PEV';
+COMMENT ON COLUMN pevlissage.mlbcom IS 'Quote-part de lissage de la commune';
+COMMENT ON COLUMN pevlissage.mlbsyn IS 'Quote-part de lissage du syndicat intercommunal';
+COMMENT ON COLUMN pevlissage.mlbcu  IS 'Quote-part de lissage de
+l’intercommunalité';
+COMMENT ON COLUMN pevlissage.mlbdep IS 'Quote-part de lissage du
+département';
+COMMENT ON COLUMN pevlissage.mlbts1 IS 'Quote-part de lissage de la TSE';
+COMMENT ON COLUMN pevlissage.mlbts2 IS 'Quote-part de lissage de la TSE
+autre';
+COMMENT ON COLUMN pevlissage.mlbtas IS 'Quote-part de lissage de la TASA';
+COMMENT ON COLUMN pevlissage.mlbgem IS 'Quote-part de lissage GEMAPI';
+COMMENT ON COLUMN pevlissage.mlbtom IS 'Quote-part de lissage TEOM';
+COMMENT ON COLUMN pevlissage.tbfpas IS 'Pas de lissage du local';
+COMMENT ON COLUMN pevlissage.lot IS 'Code de lot d''import';
+
+
+COMMENT ON TABLE pevdependances IS 'Article descriptif de dépendance. Bati enregistrement 60';
 COMMENT ON COLUMN pevdependances.ccodep IS 'Code département - ';
 COMMENT ON COLUMN pevdependances.ccodir IS 'Code direction - ';
 COMMENT ON COLUMN pevdependances.ccocom IS 'Code commune INSEE - ';

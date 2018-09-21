@@ -81,7 +81,7 @@ Cette boite de dialogue permet de réaliser un **import de données EDIGEO et MA
 
 ### Principe
 
-Le plugin permet l'import de données **MAJIC de 2012 à 2016 et des données EDIGEO** . Il est possible d'importer des données de manière incrémentale, **étape par étape**, ou bien d'importer **en une seule fois**.
+Le plugin permet l'import de données **MAJIC de 2012 à 2018 et des données EDIGEO** . Il est possible d'importer des données de manière incrémentale, **étape par étape**, ou bien d'importer **en une seule fois**.
 
 Le plugin utilise pour cela la notion de **lot**. Un lot regroupe un **ensemble de données cohérent** pour votre utilisation. Par exemple, le lot peut être le code d'une commune, ou l'acronyme d'une communauté de commune. C'est une chaîne de 10 caractères maximum. Vous pouvez utiliser des chiffres ou des lettres.
 
@@ -114,7 +114,6 @@ Pour les bases de données **PostGIS**, il faut :
 
 Pour les bases de données **Spatialite**, l'interface d'import permet de créer une base de données vide et la connexion QGIS liée si nécessaire.
 
-
 ### Les étapes d'importation
 
 Pour lancer l'importation, il faut bien avoir au préalable configuré les noms des fichiers MAJIC via le menu **Configurer le plugin**. Ensuite, on ouvre la boite de dialogue
@@ -143,13 +142,13 @@ On configure ensuite les options :
 * Choisir le répertoire contenant **les fichiers MAJIC**
 
     - Comme pour EDIGEO, le plugin ira chercher les fichiers dans les répertoires et les sous-répertoires et importera l'ensemble des données.
-    - Si vous ne possédez pas les données FANTOIR dans votre jeu de données MAJIC, nous conseillons vivement de les télécharger et de configurer le plugin pour donner le bon nom au fichier fantoir : http://www.collectivites-locales.gouv.fr/mise-a-disposition-fichier-fantoir-des-voies-et-lieux-dits
+    - Si vous ne possédez pas les données FANTOIR dans votre jeu de données MAJIC, nous conseillons vivement de les télécharger et de configurer le plugin pour donner le bon nom au fichier fantoir : https://www.collectivites-locales.gouv.fr/mise-a-disposition-gratuite-fichier-des-voies-et-des-lieux-dits-fantoir
 
 * Choisir la **version du format** en utilisant les flèches haut et bas
 
-    - Seuls les formats de 2012 à 2016 sont pris en compte
+    - Seuls les formats de 2012 à 2018 sont pris en compte
 
-* Choisir le **millésime des données**, par exemple 2012
+* Choisir le **millésime des données**, par exemple 2018
 
 * Choisir le **Lot** : utilisez par exemple le code INSEE de la commune.
 
@@ -165,11 +164,33 @@ Le déroulement de l'import est écrit dans le bloc texte situé en bas de la fe
 .. note::  Pendant l'import, il est conseillé de ne pas déplacer ou cliquer dans la fenêtre. Pour l'instant, le plugin n'intègre pas de bouton pour annuler un import en cours.
 
 
+### Projections IGNF
+
+Si votre donnée EDIGEO est en projection IGNF, par exemple pour la Guadeloupe, IGNF:GUAD48UTM20 (Guadeloupe Ste Anne), et que vous souhaitez importer les données dans PostgreSQL, il faut au préalable ajouter dans votre table public.spatial_ref_sys la définition de la projection IGNF. Si vous utilisez à la place l'équivalent EPSG (par exemple ici EPSG:2970), vous risquez un décalage des données lors de la reprojection.
+
+Vous pouvez ajouter dans votre base de données la définition via une requête, par exemple avec la requête suivante pour IGNF:GUAD48UTM20:
+
+```
+INSERT INTO spatial_ref_sys values (
+    998999,
+    'IGNF',
+    998999,
+    'PROJCS["Guadeloupe Ste Anne",GEOGCS["Guadeloupe Ste Anne",DATUM["Guadeloupe St Anne",SPHEROID["International-Hayford 1909",6378388.0000,297.0000000000000,AUTHORITY["IGNF","ELG001"]],TOWGS84[-472.2900,-5.6300,-304.1200,0.4362,-0.8374,0.2563,1.898400],AUTHORITY["IGNF","REG425"]],PRIMEM["Greenwich",0.000000000,AUTHORITY["IGNF","LGO01"]],UNIT["degree",0.01745329251994330],AXIS["Longitude",EAST],AXIS["Latitude",NORTH],AUTHORITY["IGNF","GUAD48GEO"]],PROJECTION["Transverse_Mercator",AUTHORITY["IGNF","PRC0220"]],PARAMETER["semi_major",6378388.0000],PARAMETER["semi_minor",6356911.9461],PARAMETER["latitude_of_origin",0.000000000],PARAMETER["central_meridian",-63.000000000],PARAMETER["scale_factor",0.99960000],PARAMETER["false_easting",500000.000],PARAMETER["false_northing",0.000],UNIT["metre",1],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["IGNF","GUAD48UTM20"]]',
+    '+init=IGNF:GUAD48UTM20'
+);
+```
+
+Attention, il est important d'utiliser un code qui est <= 998999, car PostGIS place des contraintes sur le SRID. Nous avons utilisé ici 998999, qui est le maximum possible.
+La liste des caractéristiques des projections peut être trouvée à ce lien : http://librairies.ign.fr/geoportail/resources/IGNF-spatial_ref_sys.sql ( voir discussion Géorézo : https://georezo.net/forum/viewtopic.php?pid=268134 ). Attention, il faut extraire de ce fichier la commande INSERT qui correspond à votre code IGNF, et remplacer le SRID par 998999.
+
+Ensuite, dans la projection source, vous pouvez utiliser IGNF:GUAD48UTM20 au lieu du code EPSG correspondant.
+
 ## Charger des données
 
 Une fois les données importées dans la base, vous pouvez les importer dans QGIS via le menu **Charger les données**.
 
 ![alt](MEDIA/cadastre_load_dialog.png)
+
 
 ### Base de données de travail
 
@@ -205,6 +226,46 @@ Exemples d'expression:
 Pensez à **enlever les données cadastrales existantes dans votre projet QGIS** : Le plugin ne sait pas gérer la recherche et l'interrogation de données si on a plus qu'une version des couches parcelles, communes et sections dans le projet QGIS.
 
 Enfin, cliquez sur le bouton **Charger les données** pour lancer le chargement.
+
+### Charger une couche à partir d'un requête.
+
+L'onglet **Charger une requête** vous donne la possibilité d'utiliser une requête SQL pour récupérer des données de la base. Pour cela, il faut bien connaître le modèle de la base de données, et les spécificités des données MAJIC. Cette fonctionnalité vise à évoluer pour proposer une liste de requêtes intéressantes pour l'exploitation des données cadastrales.
+
+![alt](MEDIA/cadastre_load_dialog_requete.png)
+
+Une fois la connexion choisie, vous pouvez écrire le texte SQL dans le champ texte.
+
+* La requête peut renvoyer des données spatiales ou seulement des données attributaires.
+* Si un des champs retournés est une géométrie, vous devez spécifier son nom dans le champ texte dédié.
+* Si vous utilisez une connexion PostGIS, il faut préfixer les tables avec le nom du schéma. Par exemple `cadastre.geo_parcelle`.
+
+La requête suivante retourne par exemple pour chaque code de parcelle la date de l'acte (on suppose que le schéma est cadastre). Vous pouvez ensuite utiliser une jointure QGIS pour faire le lien avec la couche Parcelles:
+
+```
+SELECT p.parcelle, p.jdatat AS date_acte
+FROM cadastre.parcelle p
+```
+
+La requête suivante renvoit toutes les parcelles appartenant à des collectivités locales, avec la géométrie et les noms des propriétaires
+
+```
+SELECT gp.geo_parcelle,
+string_agg(
+   trim(
+      concat(
+         pr.dnuper || ' - ',
+         trim(pr.dqualp) || ' ',
+         trim(pr.ddenom)
+      )
+   ),'|'
+) AS proprietaire,
+gp.geom AS geom
+FROM cadastre.geo_parcelle gp
+JOIN cadastre.parcelle p ON gp.geo_parcelle = p.parcelle
+JOIN cadastre.proprietaire pr ON p.comptecommunal = pr.comptecommunal
+WHERE pr.dnatpr = 'CLL'
+GROUP BY gp.geo_parcelle, gp.geom
+```
 
 
 ## La barre d'outil Cadastre
@@ -270,8 +331,7 @@ Cette fonctionnalité est basique, et ne gère pas pour l'instant les composeurs
 
 Le panneau de recherche propose des outils pour rechercher des parcelles via 3 entrées principales
 
-* une recherche par **objet géographque** : commune et section
-* une recherche par **adresse**
+* une recherche par **objet géographque** : commune, section, adresse et parcelles
 * une recherche par **propriétaire**
 
 Les différentes recherches seront détaillées dans les sous-chapitres suivants.
@@ -282,7 +342,7 @@ Pour afficher le panneau de recherche:
 
 Une bulle d'information affiche la fonction des boutons au survol de la souris.
 
-.. note::  Si la base de données ne contient aucune donnée MAJIC, alors les outils de recherche par adresse et par propriétaire sont désactivés.
+.. note::  Si la base de données ne contient aucune donnée MAJIC, alors les recherches par adresse et par propriétaire sont désactivés.
 
 
 ### Recherche de lieux
@@ -291,17 +351,18 @@ L'outil présente 3 listes déroulantes :
 
 * **Commune**
 * **Section**
+* **Adresses**
 * **Parcelles**
 
-Il est possible de **sélectionner une entité**:
+Il est possible de **sélectionner une entité** dans les listes:
 
 * soit *à la souris* en cliquant sur la flèche pour ouvrir la liste déroulante puis sélectionner un item.
-* soit en *tapant les premières lettres* et en sélectionnant l'item choisi dans la liste d'autocomplétion qui s'affiche alors.
+* soit en *tapant les premières lettres* et en sélectionnant l'item choisi dans la liste d'autocomplétion qui s'affiche alors. Il faut avoir au préalable vider le contenu de la liste déroulante.
 
 Les listes déroulantes sont **hiérarchiques** :
 
-* Lorsqu'on choisit une commune, la liste des sections est raffraîchie et ne montre que les sections de la commune choisie.
-* lorsqu'on choisit une section, la liste des parcelles est raffraîchie.
+* Lorsqu'on choisit une commune, la liste des sections est raffraîchie et ne montre que les sections de la commune choisie. La recherche d'adresse est aussi filtrée sur cette commune.
+* lorsqu'on choisit une section, la liste des parcelles est raffraîchie et montre les parcelles sur la section.
 
 Des **boutons d'actions** sont positionnés sous les 3 listes déroulantes et permettent de lancer l'action choisie sur le dernier objet sélectionné dans les 3 listes :
 
@@ -309,7 +370,7 @@ Des **boutons d'actions** sont positionnés sous les 3 listes déroulantes et pe
 * *Zoomer sur l'objet* : la carte est déplacée et mise à l'échelle pour afficher l'objet sélectionné
 * *Sélectionner l'objet* : l'objet est sélectionné dans la couche de données correspondante ( Communes, Sections ou Parcelles)
 
-A côté des 3 listes, un bouton **croix rouge** permet de remettre la liste à son état initial, c'est-à-dire sans objet sélectionné. Par exemple, si on avait sélectionné une commune dans la premier liste et une section dans la seconde, on peut cliquer sur la croix rouge à côté de la section pour désélectionner la section dans la liste. Ainsi si on utilise le bouton de Zoom, on zoomera sur la commune et non sur la section qui était précédemment sélectionnée
+A côté des listes, un bouton **croix rouge** permet de remettre la liste à son état initial, c'est-à-dire sans objet sélectionné. Par exemple, si on avait sélectionné une commune dans la premier liste et une section dans la seconde, on peut cliquer sur la croix rouge à côté de la section pour désélectionner la section dans la liste. Ainsi si on utilise le bouton de Zoom, on zoomera sur la commune et non sur la section qui était précédemment sélectionnée
 
 Si une parcelle a été sélectionnée dans la liste **Parcelles**, il est possible d'**exporter le relevé parcellaire** en cliquant sur le bouton *icône PDF* situé en bas à droite du bloc de recherche de lieux. Le **PDF est généré et ouvert** avec le lecteur PDF par défaut du système.
 
@@ -323,7 +384,7 @@ Pour lancer une **recherche de parcelles par adresse**, il suffit:
 * d'*entrer l'adresse cherchée*, sans le numéro de rue dans la liste **Adresse**.
 * de cliquer sur le **bouton loupe** situé à côté de la liste, ou d'appuyer sur la **touche entrée**
 
-La recherche est effectuée et la liste déroulante où vous avez tapé l'adresse à chercher est maintenant raffraîchie et contient l'ensemble des résultats trouvés.
+La recherche est effectuée et la liste déroulante où vous avez tapé l'adresse à chercher est maintenant raffraîchie et contient l'ensemble des résultats trouvés. Si une commune était sélectionnée dans la liste des communes, la recherche d'adresse ne renvoit que les voies de cette commune.
 
 Si des résultats ont été trouvés, on peut ensuite :
 
@@ -332,6 +393,7 @@ Si des résultats ont été trouvés, on peut ensuite :
 * Sélectionner une des parcelles dans la liste déroulante **Parcelles** et réutiliser les boutons d'action.
 * Si une parcelle est sélectionnée, le bouton avec une icône PDF permet d'**exporter le relevé parcellaire** pour cette parcelle
 
+Vous pouvez cliquer sur la croix rouge à côté de la recherche d'adresse pour désélectionner l'adresse choisie.
 
 ### Recherche de propriétaires
 
@@ -344,6 +406,35 @@ Le principe et le fonctionnement est le même que pour la recherche par adresse,
 
 Il est possible d'exporter le relevé de propriété pour les personnes qui ne possèdent pas de propriété non bâtie.
 
+
+### Utilisation du plugin QuickFinder pour chercher les parcelles
+
+Vous pouvez installer le plugin QuickFinder pour préparer et utiliser des recherches sur différentes couches cadastrales. Exemple de configuration intéressante:
+
+* Ouvrir la boîte de dialogue de configuration du plugin: *Menu Extensions / QuickFinder / Settings*
+* Aller à l'onglet *Project Search*
+* Cocher la case *Search in project layers*
+* A côté du champ *QuickFinder file*, cliquer sur le bouton avec une icône "page" pour créer un nouveau fichier (en anglais, au survol du  bouton: *Create a new QuickFinder file* ). Enregistrer le fichier dans le répertoire du projet QGIS, et lui donner le même nom de fichier (par exemple "cadastre.qfts" pour un projet QGIS "cadastre.qgs")
+* Cliquer sur le bouton "+" en vert pour ajouter une nouvelle recherche: cela ouvre une boite de dialogue *project search*. Configurer une recherche pour les parcelles:
+  - *Search name* : Parcelles
+  - *Layer*: Parcelles
+  - *Field* : vous pouvez utiliser un champ, ou mieux une expression QGIS pour concaténer des informations, en cliquant sur le bouton "epsilon", par exemple:
+  ```sql
+  Concat(
+    'COM ', "codecommune", ' / ',
+    'SEC ', substr("idu", 7, 2), ' / ',
+    'PAR ', substr("idu", 9, 4), ' / ',
+    'ADR ', "adresse", ' / ',
+    '', "proprietaire",
+    ' @@', "codecommune"
+  )
+  ```
+  ( la partie avec @@ et le codecommune à la fin sont utiles si vous publiez le cadastre sur internet vers l'application Lizmap. Cela permet de filtrer les données )
+  - *Geometry storage*: wkt
+  - *Priority*: 1
+  - *record entries*: laisser coché, cela va lancer la création des données de recherche et leur stockage dans le fichier QuickFinder
+
+Une fois cette configuration effectuée, vous pouvez fermer les fenêtres QuickFinder, puis utiliser la barre d'outil QuickFinder pour chercher des parcelles via leur code, le code commune, le code de section, ou bien le nom des propriétaires.
 
 ## À propos
 
@@ -384,7 +475,7 @@ Dans le modèle, plusieurs tables contiennent des informations sur les parcelles
 
 Les champs parcelle.parcelle et geo_parcelle.geo_parcelle peuvent être utilisés pour les jointures entre la table parcelle et la table geo_parcelle
 
-L'identifiant **geo_parcelle** (ou parcelle) est unique et constitué comme suit : 
+L'identifiant **geo_parcelle** (ou parcelle) est unique et constitué comme suit :
 *Année (4) + Département (2) + Direction (1) + Commune (3) + Préfixe (3) + Secteur (2) + Numéro de plan (4)*
 soit **19 caractères**
 

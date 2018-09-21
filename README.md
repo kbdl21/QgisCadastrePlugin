@@ -33,6 +33,11 @@ Michaël DOUCHIN
 e-mail: info@3liz.com
 twitter : https://twitter.com/kimaidou
 
+Contributeurs
+=============
+
+* Landry Breuil @landryb
+
 Sources
 =======
 
@@ -41,11 +46,15 @@ GitHub : https://github.com/3liz/QgisCadastrePlugin
 Licence
 =======
 
-GPL V3
-Lien : http://www.gnu.org/licenses/gpl.html
+GNU Public License (GPL) Version 2 ou supérieure
 
 Documentation
 ==============
+
+Utilisation
+------------
+
+Voir [doc/index.md](doc/index.md)
 
 Base de données
 ----------------

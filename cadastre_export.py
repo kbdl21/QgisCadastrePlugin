@@ -32,10 +32,35 @@ import os.path
 import operator
 import tempfile
 import re
-from PyQt4.QtCore import *
-from PyQt4.QtGui import *
-from qgis.core import *
 
+from PyQt4.QtCore import (
+    Qt,
+    QObject,
+    QSettings,
+    QUrl
+)
+from PyQt4.QtGui import (
+    QApplication,
+    QDesktopServices,
+    QFont
+)
+from qgis.core import (
+    QGis,
+    QgsMapLayerRegistry,
+    QgsMessageLog,
+    QgsLogger,
+    QgsExpression,
+    QgsMapLayer,
+    QgsVectorLayer,
+    QgsFeatureRequest,
+    QgsComposition,
+    QgsComposerPicture,
+    QgsComposerMap,
+    QgsComposerLabel,
+    QgsMapRenderer,
+    QgsMapSettings,
+    QgsFillSymbolV2
+)
 from cadastre_dialogs import cadastre_common
 
 try:
@@ -592,13 +617,14 @@ class cadastreExport(QObject):
             from time import time
             temp = "releve_%s_%s_%s.pdf" % (
                 self.etype,
-                comptecommunal,
+                comptecommunal.replace('+', 'plus').replace('*', 'fois'), #.replace('¤', 'plus'),
                 int(time()*100)
             )
             # Create regexp to remove all non ascii chars
             import re
             r = re.compile(r"[^ -~]")
             temp = r.sub('', temp)
+            #print temp
             temppath = os.path.join(self.targetDir, temp)
             temppath = os.path.normpath(temppath)
 
@@ -681,10 +707,18 @@ class cadastreExport(QObject):
         self.printProgress.show()
 
 if iface:
-    from cadastre_print_form import *
-
-    class cadastrePrintProgress(QDialog, Ui_cadastre_print_form):
-        def __init__(self):
-            QDialog.__init__(self)
+    from PyQt4 import uic
+    PRINT_FORM_CLASS, _ = uic.loadUiType(
+        os.path.join(
+            os.path.dirname(__file__),
+            'forms/cadastre_print_form.ui'
+        )
+    )
+    from PyQt4.QtGui import (
+        QDialog
+    )
+    class cadastrePrintProgress(QDialog, PRINT_FORM_CLASS):
+        def __init__(self, parent=None):
+            super(cadastrePrintProgress, self).__init__(parent)
             # Set up the user interface
             self.setupUi(self)

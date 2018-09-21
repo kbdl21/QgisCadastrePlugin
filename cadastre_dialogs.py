@@ -27,17 +27,56 @@ import os.path
 import operator
 import re
 import tempfile
-from PyQt4.QtCore import *
-from PyQt4.QtGui import *
-from qgis.core import *
-from qgis.gui import QgsGenericProjectionSelector
+from PyQt4.QtCore import (
+    Qt,
+    pyqtSignal,
+    QObject,
+    QSettings,
+    QRegExp,
+    QFileInfo
+)
+from PyQt4.QtGui import (
+    QTextCursor,
+    QDialog,
+    QFileDialog,
+    QApplication,
+    qApp,
+    QCursor,
+    QPixmap,
+    QCompleter,
+    QSortFilterProxyModel,
+    QStringListModel,
+    QDockWidget,
+    QMessageBox
+)
+from qgis.core import (
+    QgsMapLayerRegistry,
+    QgsMessageLog,
+    QgsLogger,
+    QgsExpression,
+    QgsDataSourceURI,
+    QgsMapLayer,
+    QgsFeatureRequest,
+    QgsCoordinateTransform,
+    QgsCoordinateReferenceSystem
+)
+from qgis.gui import (
+    QgsGenericProjectionSelector
+)
 import unicodedata
 
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/forms")
 
-from db_manager.db_plugins.plugin import DBPlugin, Schema, Table
+# db_manager scripts
+from db_manager.db_plugins.plugin import (
+    DBPlugin,
+    Schema,
+    Table,
+    BaseError
+)
 from db_manager.db_plugins import createDbPlugin
+from db_manager.dlg_db_error import DlgDbError
 from db_manager.db_plugins.postgis.connector import PostGisDBConnector
 import subprocess
 
@@ -453,6 +492,7 @@ class cadastre_common():
         rowCount = 0
         c = None
         ok = True
+        #print "run query"
         try:
             c = connector._execute(None,unicode(sql).encode('utf-8'))
             data = []
@@ -487,14 +527,18 @@ class cadastre_common():
 
         finally:
             if c:
+                #print "close connection"
                 c.close()
                 del c
 
         # Log errors
         if not ok:
-            print error_message
+            try:
+                print error_message.encode('utf-8')
+                print sql
+            except:
+                ok = False
             QgsMessageLog.logMessage( "cadastre debug - error while fetching data from database" )
-            return
 
         return [header, data, rowCount, ok]
 
@@ -599,7 +643,8 @@ class cadastre_common():
             {'in': r"ST_MakeValid\(geom\)",
              'out': r"CASE WHEN ST_IsValid(geom) THEN geom ELSE ST_Buffer(geom,0) END"},
             {'in': r"ST_MakeValid\(p\.geom\)",
-             'out': r"CASE WHEN ST_IsValid(p.geom) THEN p.geom ELSE ST_Buffer(p.geom,0) END"}
+             'out': r"CASE WHEN ST_IsValid(p.geom) THEN p.geom ELSE ST_Buffer(p.geom,0) END"},
+            {'in': r' ~ ', 'out': ' regexp '}
         ]
 
         for a in replaceDict:
@@ -749,7 +794,7 @@ class cadastre_common():
         sql = " SELECT trim(ddenom) AS k, MyStringAgg(comptecommunal, ',') AS cc, dnuper"
         sql+= " FROM proprietaire p"
         sql+= " WHERE 2>1"
-        sql+= " AND ddenom IN (SELECT ddenom FROM proprietaire WHERE comptecommunal = %s)" % connector.quoteString( comptecommunal )
+        sql+= " AND trim(p.ddenom) IN (SELECT trim(ddenom) FROM proprietaire WHERE comptecommunal = '%s')" % comptecommunal
         sql+= " GROUP BY dnuper, ddenom, dlign4"
         sql+= " ORDER BY ddenom"
 
@@ -760,20 +805,27 @@ class cadastre_common():
             sql = sql.replace('MyStringAgg', 'group_concat')
 
         [header, data, rowCount, ok] = cadastre_common.fetchDataFromSqlQuery(connector,sql)
+        ccs = []
         if ok:
             for line in data:
-                cc = line[1].split(',')
+                ccs = ccs + line[1].split(',')
 
-        return cc
+        return ccs
 
 
-from cadastre_import_form import *
-from cadastre_import import *
 
-class cadastre_import_dialog(QDialog, Ui_cadastre_import_form):
-    def __init__(self, iface):
-        QDialog.__init__(self)
+from cadastre_import import cadastreImport
+from PyQt4 import uic
+IMPORT_FORM_CLASS, _ = uic.loadUiType(
+    os.path.join(
+        os.path.dirname(__file__),
+        'forms/cadastre_import_form.ui'
+    )
+)
+class cadastre_import_dialog(QDialog, IMPORT_FORM_CLASS):
+    def __init__(self, iface, parent=None):
         self.iface = iface
+        super(cadastre_import_dialog, self).__init__(parent)
         self.setupUi(self)
 
         self.connectionDbList = []
@@ -1129,12 +1181,18 @@ class cadastre_import_dialog(QDialog, Ui_cadastre_import_form):
 #        load - Load data from database
 # --------------------------------------------------------
 
-from cadastre_load_form import *
-from cadastre_loading import *
 
-class cadastre_load_dialog(QDialog, Ui_cadastre_load_form):
-    def __init__(self, iface, cadastre_search_dialog):
-        QDialog.__init__(self)
+from cadastre_loading import cadastreLoading
+from PyQt4 import uic
+LOAD_FORM_CLASS, _ = uic.loadUiType(
+    os.path.join(
+        os.path.dirname(__file__),
+        'forms/cadastre_load_form.ui'
+    )
+)
+class cadastre_load_dialog(QDialog, LOAD_FORM_CLASS):
+    def __init__(self, iface, cadastre_search_dialog, parent=None):
+        super(cadastre_load_dialog, self).__init__(parent)
         self.iface = iface
         self.setupUi(self)
         self.mc = self.iface.mapCanvas()
@@ -1172,6 +1230,9 @@ class cadastre_load_dialog(QDialog, Ui_cadastre_load_form):
         self.liDbConnection.currentIndexChanged[str].connect(self.qc.updateSchemaList)
         self.btProcessLoading.clicked.connect(self.onProcessLoadingClicked)
         self.ql.cadastreLoadingFinished.connect(self.onLoadingEnd)
+
+        self.btLoadSqlLayer.clicked.connect(self.onLoadSqlLayerClicked)
+
         self.rejected.connect(self.onClose)
         self.buttonBox.rejected.connect(self.onClose)
 
@@ -1209,6 +1270,16 @@ class cadastre_load_dialog(QDialog, Ui_cadastre_load_form):
             if self.db:
                 self.ql.processLoading()
 
+    def onLoadSqlLayerClicked(self):
+        '''
+        Loads a layer
+        from given SQL
+        when user clicked on button
+        '''
+        if self.connection:
+            if self.db:
+                self.ql.loadSqlLayer()
+
     def onLoadingEnd(self):
         '''
         Actions to trigger
@@ -1222,16 +1293,62 @@ class cadastre_load_dialog(QDialog, Ui_cadastre_load_form):
 
 
 
+#Custom completer (to allow completion when string found anywhere
+class CustomQCompleter(QCompleter):
+    """
+    adapted from: http://stackoverflow.com/a/7767999/2156909
+    """
+    def __init__(self, *args):#parent=None):
+        super(CustomQCompleter, self).__init__(*args)
+        self.local_completion_prefix = ""
+        self.source_model = None
+        self.filterProxyModel = QSortFilterProxyModel(self)
+        self.usingOriginalModel = False
+
+    def setModel(self, model):
+        self.source_model = model
+        self.filterProxyModel = QSortFilterProxyModel(self)
+        self.filterProxyModel.setSourceModel(self.source_model)
+        super(CustomQCompleter, self).setModel(self.filterProxyModel)
+        self.usingOriginalModel = True
+
+    def updateModel(self):
+        if not self.usingOriginalModel:
+            self.filterProxyModel.setSourceModel(self.source_model)
+
+        pattern = QRegExp(self.local_completion_prefix,
+                                Qt.CaseInsensitive
+                                ,QRegExp.FixedString
+                                )
+
+        self.filterProxyModel.setFilterRegExp(pattern)
+
+    def splitPath(self, path):
+        self.local_completion_prefix = path
+        self.updateModel()
+        if self.filterProxyModel.rowCount() == 0:
+            self.usingOriginalModel = False
+            self.filterProxyModel.setSourceModel(QStringListModel([path]))
+            return [path]
+
+        return []
+
 # ---------------------------------------------------------
 #        search - search for data among database ans export
 # ---------------------------------------------------------
 
-from cadastre_search_form import *
-from cadastre_export import *
-
-class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
-    def __init__(self, iface):
-        QDockWidget.__init__(self)
+from cadastre_import import cadastreImport
+from PyQt4 import uic
+SEARCH_FORM_CLASS, _ = uic.loadUiType(
+    os.path.join(
+        os.path.dirname(__file__),
+        'forms/cadastre_search_form.ui'
+    )
+)
+class cadastre_search_dialog(QDockWidget, SEARCH_FORM_CLASS):
+    def __init__(self, iface, parent=None):
+        #QDockWidget.__init__(self)
+        super(cadastre_search_dialog, self).__init__(parent)
         self.iface = iface
         self.setupUi(self)
         self.iface.addDockWidget(Qt.RightDockWidgetArea, self)
@@ -1266,7 +1383,9 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
             'commune': {
                 'widget': self.liCommune,
                 'labelAttribute': 'tex2',
-                'table': 'geo_commune', 'geomCol': 'geom', 'sql': '',
+                'table': 'geo_commune',
+                'geomCol': 'geom',
+                'sql': '',
                 'layer': None,
                 'request': None,
                 'attributes': ['ogc_fid','tex2','idu','geo_commune','geom', 'lot'],
@@ -1274,16 +1393,20 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
                 'features': None,
                 'chosenFeature': None,
                 'resetWidget': self.btResetCommune,
-                'child': {
-                    'key': 'section',
-                    'fkey': 'geo_commune',
-                    'getIfNoFeature': True
-                }
+                'children': [
+                    {
+                        'key': 'section',
+                        'fkey': 'geo_commune',
+                        'getIfNoFeature': True
+                    }
+                ]
             },
             'section': {
                 'widget': self.liSection,
                 'labelAttribute': 'idu',
-                'table': 'geo_section', 'geomCol': 'geom', 'sql': '',
+                'table': 'geo_section',
+                'geomCol': 'geom',
+                'sql': '',
                 'layer': None,
                 'request': None,
                 'attributes': ['ogc_fid','tex','idu','geo_commune','geo_section','geom','lot'],
@@ -1291,16 +1414,46 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
                 'features': None,
                 'chosenFeature': None,
                 'resetWidget': self.btResetSection,
-                'child': {
-                    'key': 'parcelle',
-                    'fkey': 'geo_section',
-                    'getIfNoFeature': False
-                }
+                'children': [
+                    {
+                        'key': 'parcelle',
+                        'fkey': 'geo_section',
+                        'getIfNoFeature': False
+                    }
+                ]
+            },
+            'adresse': {
+                'widget': self.liAdresse,
+                'labelAttribute': 'voie',
+                'table': 'parcelle_info',
+                'layer': None,
+                'geomCol': None,
+                'sql': '',
+                'request': None,
+                'attributes': ['ogc_fid','voie','idu','geom'],
+                'orderBy': ['voie'],
+                'features': None,
+                'chosenFeature': None,
+                'resetWidget': self.btResetAdresse,
+                'connector': None,
+                'search': {
+                    'parcelle_child': 'parcelle',
+                    'minlen': 3
+                },
+                'children': [
+                    {
+                        'key': 'parcelle',
+                        'fkey': 'voie',
+                        'getIfNoFeature': False
+                    }
+                ]
             },
             'parcelle': {
                 'widget': self.liParcelle,
                 'labelAttribute': 'idu',
-                'table': 'parcelle_info', 'geomCol': 'geom', 'sql': '',
+                'table': 'parcelle_info',
+                'geomCol': 'geom',
+                'sql': '',
                 'layer': None,
                 'request': None,
                 'attributes': ['ogc_fid','tex','idu','geo_section','geom', 'comptecommunal', 'geo_parcelle'],
@@ -1323,15 +1476,17 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
                 'chosenFeature': None,
                 'connector': None,
                 'search': {
-                    'button' : self.btSearchProprietaire,
-                    'child': 'parcelle_proprietaire',
+                    'parcelle_child': 'parcelle_proprietaire',
                     'minlen': 3
-                }
+                },
+                'resetWidget': self.btResetProprietaire,
             },
             'parcelle_proprietaire': {
                 'widget': self.liParcelleProprietaire,
                 'labelAttribute': 'idu',
-                'table': 'parcelle_info', 'geomCol': 'geom', 'sql': '',
+                'table': 'parcelle_info',
+                'geomCol': 'geom',
+                'sql': '',
                 'layer': None,
                 'request': None,
                 'attributes': ['ogc_fid','tex','idu','comptecommunal','geom', 'geo_parcelle'],
@@ -1340,36 +1495,6 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
                 'chosenFeature': None,
                 'connector': None,
                 'resetWidget': self.btResetParcelleProprietaire
-            },
-            'adresse': {
-                'widget': self.liAdresse,
-                'labelAttribute': 'voie',
-                'table': 'parcelle_info',
-                'layer': None,
-                'request': None,
-                'attributes': ['ogc_fid','voie','idu','geom'],
-                'orderBy': ['voie'],
-                'features': None,
-                'chosenFeature': None,
-                'connector': None,
-                'search': {
-                    'button' : self.btSearchAdresse,
-                    'child': 'parcelle_adresse',
-                    'minlen': 3
-                }
-            },
-            'parcelle_adresse': {
-                'widget': self.liParcelleAdresse,
-                'labelAttribute': 'idu',
-                'table': 'parcelle_info', 'geomCol': 'geom', 'sql': '',
-                'layer': None,
-                'request': None,
-                'attributes': ['ogc_fid','tex','idu','voie','geom', 'comptecommunal', 'geo_parcelle'],
-                'orderBy': ['geo_parcelle'],
-                'features': None,
-                'chosenFeature': None,
-                'connector': None,
-                'resetWidget': self.btResetParcelleAdresse
             }
         }
 
@@ -1384,15 +1509,7 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
                     'zoom': self.btZoomerLieu,
                     'select': self.btSelectionnerLieu
                 },
-                'comboboxes': ['commune', 'section', 'parcelle']
-            },
-            'adresse':{
-                'buttons':{
-                    'centre': self.btCentrerAdresse,
-                    'zoom': self.btZoomerAdresse,
-                    'select': self.btSelectionnerAdresse
-                },
-                'comboboxes': ['adresse', 'parcelle_adresse']
+                'comboboxes': ['commune', 'section', 'adresse', 'parcelle']
             },
             'proprietaire':{
                 'buttons':{
@@ -1417,27 +1534,40 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
 
         # Manuel search button and combo (proprietaire, adresse)
         for key, item in self.searchComboBoxes.items():
-            # manual search widgets
+            # Combobox not prefilled (too much data proprietaires & adresse
             if item.has_key('search'):
-                # search button
-                control = item['search']['button']
-                slot = partial(self.searchItem, key)
-                control.clicked.connect(slot)
-                # connect Enter key pressed event
-                item['widget'].lineEdit().returnPressed.connect(slot)
 
-                # when a search result is chosen in combobox
+                # when the user add some text : autocomplete
+                # the search comboboxes are not filled in with item
+                # only autocompletion popup is filled while typing
+                # Activate autocompletion
+                completer = CustomQCompleter([], self)
+                #completer.setCompletionMode(QCompleter.PopupCompletion) # does not work with regex custom completer
+                completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
+                completer.setMaxVisibleItems(20)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                #completer.popup().setStyleSheet("background-color: lightblue")
+                completer.activated.connect(partial(self.onCompleterActivated, key))
                 control = item['widget']
-                slot = partial(self.onSearchItemChoose, key)
-                control.currentIndexChanged[str].connect(slot)
+                li = control.lineEdit()
+                li.setCompleter(completer)
+                li.textEdited.connect(partial(self.refreshAutocomplete, key))
+
+                # when the user resets the entered value
+                control = item['resetWidget']
+                slot = partial(self.onSearchItemReset, key)
+                control.clicked.connect(slot)
+
             else:
                 control = item['widget']
                 # when the user edits the combobox content
                 slot = partial(self.onNonSearchItemEdit, key)
                 control.editTextChanged[str].connect(slot)
+
                 # when the user chooses in the list
                 slot = partial(self.onNonSearchItemChoose, key)
                 control.currentIndexChanged[str].connect(slot)
+
                 # when the user reset the entered value
                 control = item['resetWidget']
                 slot = partial(self.onNonSearchItemReset, key)
@@ -1449,7 +1579,6 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
         self.btExportProprietaire.clicked.connect(self.exportProprietaire)
         self.exportParcelleButtons = {
             'parcelle': self.btExportParcelle,
-            'parcelle_adresse': self.btExportParcelleAdresse,
             'parcelle_proprietaire': self.btExportParcelleProprietaire
         }
         for key, item in self.exportParcelleButtons.items():
@@ -1527,7 +1656,7 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
 
                 connector.__del__()
 
-        self.grpAdresse.setEnabled(self.hasMajicDataVoie and self.hasMajicDataParcelle)
+        self.liAdresse.setEnabled(self.hasMajicDataVoie and self.hasMajicDataParcelle)
         self.grpProprietaire.setEnabled(self.hasMajicDataProp)
         self.btExportParcelle.setEnabled(self.hasMajicDataProp)
 
@@ -1559,7 +1688,6 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
             searchCombo['geomCol'],
             searchCombo['sql']
         )
-
 
         self.searchComboBoxes[combo]['layer'] = layer
         if layer:
@@ -1612,7 +1740,7 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
             pView = cb.view()
             pView.setMinimumWidth(pView.sizeHintForColumn(0))
 
-            # Activate autocompletion
+            # Activate autocompletion ( based on combobox content, match only first letters)
             completer = QCompleter(itemList, self)
             completer.setCompletionMode(QCompleter.PopupCompletion)
             completer.setMaxVisibleItems(30)
@@ -1629,6 +1757,179 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
             self.searchComboBoxes[combo]['chosenFeature'] = None
 
         return [layer, features]
+
+
+    def refreshAutocomplete(self, key):
+        '''
+        Refresh autocompletion while the users add more chars in line edit
+        '''
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+
+        # Get value
+        combo = self.searchComboBoxes[key]['widget']
+        searchValue = unicode(combo.currentText())
+
+        # Abort if searchValue length too small
+        minlen = self.searchComboBoxes[key]['search']['minlen']
+        if len(self.qc.normalizeString(searchValue)) < minlen:
+            #self.qc.updateLog(u"%s caractères minimum requis pour la recherche !" % minlen)
+            QApplication.restoreOverrideCursor()
+            return None
+
+        # Get database connection parameters from a qgis layer
+        dbtable = self.searchComboBoxes[key]['table']
+        layer = cadastre_common.getLayerFromLegendByTableProps( dbtable.replace('v_', '') )
+        if not layer:
+            QApplication.restoreOverrideCursor()
+            return None
+        connectionParams = cadastre_common.getConnectionParameterFromDbLayer(layer)
+        if not connectionParams:
+            QApplication.restoreOverrideCursor()
+            return None
+
+        # Use db_manager tool to run the query
+        connector = cadastre_common.getConnectorFromUri(connectionParams)
+        self.connector = connector
+
+        # Format searchValue
+        # get rid of contextual info
+        sp = searchValue.split('|')
+        if len(sp) > 1:
+            searchValue = sp[1]
+
+        # get rid of double spaces
+        r = re.compile(r'[ ,]+', re.IGNORECASE)
+        searchValue = r.sub(' ', searchValue).strip(' \t\n')
+
+        if key == 'adresse':
+            # get rid of stopwords
+            stopwords = ['ALLEE', 'AQUEDUC', 'ARCEAUX', 'AVENUE', 'AVENUES', 'BOULEVARD', 'CARREFOUR', 'CARRER', 'CHEMIN', 'CHEMINS', 'CHEMIN RURAL', 'CLOS', 'COUR', 'COURS', 'DESCENTE', 'ENCLOS', 'ESCALIER', 'ESPACE', 'ESPLANADE', 'GRAND RUE', 'IMPASSE', 'MAIL', 'MONTEE', 'PARVIS', 'PASSAGE', 'PASSERELLE', 'PLACE', 'PLAN', 'PONT', 'QUAI', 'ROND-POINT', 'ROUTE', 'RUE', 'RUISSEAU', 'SENTE', 'SENTIER', 'SQUARE', 'TERRASSE', 'TRABOULE', 'TRAVERSE', 'TRAVERSEE', 'TRAVERSIER', 'TUNNEL', 'VOIE', 'VOIE COMMUNALE', 'VIADUC', 'ZONE',
+            'ACH', 'ALL', 'ANGL', 'ART', 'AV', 'AVE', 'BD', 'BV', 'CAMP', 'CAR', 'CC', 'CD', 'CH', 'CHE', 'CHEM', 'CHS ', 'CHV', 'CITE', 'CLOS', 'COTE', 'COUR', 'CPG', 'CR', 'CRS', 'CRX', 'D', 'DIG', 'DOM', 'ECL', 'ESC', 'ESP', 'FG', 'FOS', 'FRM', 'GARE', 'GPL', 'GR', 'HAM', 'HLE', 'HLM ', 'IMP', 'JTE ', 'LOT', 'MAIL', 'MAIS', 'N', 'PARC', 'PAS', 'PCH', 'PL', 'PLE ', 'PONT', 'PORT', 'PROM', 'PRV', 'PTA', 'PTE', 'PTR', 'PTTE', 'QUA', 'QUAI', 'REM', 'RES', 'RIVE', 'RLE', 'ROC', 'RPE ', 'RPT ', 'RTE ', 'RUE', 'RULT', 'SEN', 'SQ', 'TOUR', 'TSSE', 'VAL', 'VC', 'VEN', 'VLA', 'VOIE', 'VOIR', 'VOY', 'ZONE'
+            ]
+            sp = searchValue.split(' ')
+            if len(sp)>0 and self.qc.normalizeString(sp[0]) in stopwords:
+                searchValue = ' '.join(sp[1:])
+                if len(self.qc.normalizeString(searchValue)) < minlen:
+                    self.qc.updateLog(u"%s caractères minimum requis pour la recherche !" % minlen)
+                    QApplication.restoreOverrideCursor()
+                    return None
+
+        sqlSearchValue = self.qc.normalizeString(searchValue)
+        searchValues = sqlSearchValue.split(' ')
+        #print searchValues
+
+        # Build SQL query
+        hasCommuneFilter = None
+        if key == 'adresse':
+            sql = ' SELECT DISTINCT v.voie, c.tex2 AS libcom, v.natvoi, v.libvoi'
+            sql+= ' FROM voie v'
+            # filter among commune existing in geo_commune
+            sql+= ' INNER JOIN geo_commune c ON c.commune = v.commune'
+            sql+= " WHERE 2>1"
+            for sv in searchValues:
+                sql+= " AND libvoi LIKE %s" % self.connector.quoteString('%'+sv+'%')
+
+            # filter on the chosen commune in the combobox, if any
+            communeCb = self.searchComboBoxes['commune']
+            searchCom = unicode(self.liCommune.currentText())
+            if communeCb and communeCb['chosenFeature'] and not isinstance(communeCb['chosenFeature'], list) and not 'item(s)' in searchCom:
+                geo_commune = communeCb['chosenFeature']['geo_commune']
+                sql+= ' AND trim(c.geo_commune) = %s' % self.connector.quoteString(geo_commune)
+                hasCommuneFilter = True
+
+            # order
+            sql+= ' ORDER BY c.tex2, v.natvoi, v.libvoi'
+
+        if key == 'proprietaire':
+            sql = " SELECT trim(ddenom) AS k, MyStringAgg(comptecommunal, ',') AS cc, dnuper" #, c.ccocom"
+            sql+= ' FROM proprietaire p'
+            #~ sql+= ' INNER JOIN commune c ON c.ccocom = p.ccocom'
+            sql+= " WHERE 2>1"
+            for sv in searchValues:
+                sql+= " AND ddenom LIKE %s" % self.connector.quoteString('%'+sv+'%')
+            sql+= ' GROUP BY dnuper, ddenom, dlign4' #, c.ccocom'
+            sql+= ' ORDER BY ddenom' #, c.ccocom'
+        self.dbType = connectionParams['dbType']
+        if self.dbType == 'postgis':
+            sql = cadastre_common.setSearchPath(sql, connectionParams['schema'])
+            sql = sql.replace('MyStringAgg', 'string_agg')
+        else:
+            sql = sql.replace('MyStringAgg', 'group_concat')
+        #self.qc.updateLog(sql)
+
+        sql+= ' LIMIT 20'
+        #print sql
+
+        [header, data, rowCount, ok] = cadastre_common.fetchDataFromSqlQuery(connector,sql)
+
+        # Write message in log
+        msg = u"%s résultats correpondent à '%s'" % (rowCount, searchValue)
+        if key == 'adresse' and hasCommuneFilter:
+            msg+=  ' pour la commune %s' % searchCom
+        #self.qc.updateLog(msg)
+
+        # Fill in the combobox
+        cb = self.searchComboBoxes[key]['widget']
+        itemList = []
+        foundValues = {}
+
+        maxString = ''
+        maxStringSize = 0
+        for line in data:
+            if key == 'adresse':
+                label = '%s | %s %s' % (
+                    line[1].strip(),
+                    line[2].strip(),
+                    line[3].strip()
+                )
+                val = {'voie' : line[0]}
+
+            if key == 'proprietaire':
+                #~ label = '%s - %s | %s' % (line[3], line[2], line[0].strip())
+                label = '%s | %s' % (line[2], line[0].strip())
+                val = {
+                    'cc' : ["'%s'" % a for a in line[1].split(',')],
+                    'dnuper' : line[2]
+                }
+
+            itemList.append(label)
+            ll = len(label)
+            if ll > maxStringSize:
+                maxString = label
+                maxStringSize = ll
+
+            # Add found values in object
+            foundValues[label] = val
+
+        self.searchComboBoxes[key]['foundValues'] = foundValues
+
+
+        # Refresh list of item in completer
+        li = cb.lineEdit()
+        co = li.completer()
+        co.model().setStringList(itemList)
+        co.updateModel()
+
+        #print(co.model().stringList())
+
+        # change width of completer popup
+        p = co.popup()
+        w = (p.width() - p.viewport().width()) + 2 * p.frameWidth() + p.fontMetrics().boundingRect(maxString).width()
+        p.setMinimumWidth(w)
+
+        #cr = QRect() # must define qrect to move it & show popup on left (not working)
+        #co.complete(cr)
+
+        # Highlight first item
+        #todo
+
+        # We do not fill the combobox (cause it overrides autocompletion)
+
+        # Restore cursor
+        QApplication.restoreOverrideCursor()
+
+
+
 
 
     def getFeaturesFromSqlQuery(self, layer, filterExpression=None, attributes='*', orderBy=None):
@@ -1713,126 +2014,23 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
         QApplication.restoreOverrideCursor()
 
 
-    def searchItem(self, key):
+    def onCompleterActivated(self, key):
         '''
-        Query database to get item (adresse, proprietaire)
-        corresponding to given name
+        Triggered when the users chooses an item in the combobox completer popup
         '''
-
-        # TODO : utiliser la recherche plein texte pour postgis et spatialite
-        # pour la recherche des propriétaires -> plus efficace et permissif
-
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-
-        # Get value
-        combo = self.searchComboBoxes[key]['widget']
-        searchValue = unicode(combo.currentText())
-
-        # Abort if searchValue length too small
-        minlen = self.searchComboBoxes[key]['search']['minlen']
-        if len(self.qc.normalizeString(searchValue)) < minlen:
-            self.qc.updateLog(u"%s caractères minimum requis pour la recherche !" % minlen)
-            QApplication.restoreOverrideCursor()
-            return None
-
-        # Get database connection parameters from a qgis layer
-        dbtable = self.searchComboBoxes[key]['table']
-        layer = cadastre_common.getLayerFromLegendByTableProps( dbtable.replace('v_', '') )
-        if not layer:
-            QApplication.restoreOverrideCursor()
-            return None
-        connectionParams = cadastre_common.getConnectionParameterFromDbLayer(layer)
-        if not connectionParams:
-            QApplication.restoreOverrideCursor()
-            return None
-
-        # Use db_manager tool to run the query
-        connector = cadastre_common.getConnectorFromUri(connectionParams)
-        self.connector = connector
-
-        # Format searchValue
-        # get rid of contextual info
-        sp = searchValue.split('|')
-        if len(sp) > 1:
-            searchValue = sp[1]
-
-        # get rid of double spaces
-        r = re.compile(r'[ ,]+', re.IGNORECASE)
-        searchValue = r.sub(' ', searchValue).strip(' \t\n')
-
-        if key == 'adresse':
-            # get rid of stopwords
-            stopwords = ['ALLEE', 'AQUEDUC', 'ARCEAUX', 'AVENUE', 'AVENUES', 'BOULEVARD', 'CARREFOUR', 'CARRER', 'CHEMIN', 'CHEMINS', 'CHEMIN RURAL', 'CLOS', 'COUR', 'COURS', 'DESCENTE', 'ENCLOS', 'ESCALIER', 'ESPACE', 'ESPLANADE', 'GRAND RUE', 'IMPASSE', 'MAIL', 'MONTEE', 'PARVIS', 'PASSAGE', 'PASSERELLE', 'PLACE', 'PLAN', 'PONT', 'QUAI', 'ROND-POINT', 'ROUTE', 'RUE', 'RUISSEAU', 'SENTE', 'SENTIER', 'SQUARE', 'TERRASSE', 'TRABOULE', 'TRAVERSE', 'TRAVERSEE', 'TRAVERSIER', 'TUNNEL', 'VOIE', 'VOIE COMMUNALE', 'VIADUC', 'ZONE',
-            'ACH', 'ALL', 'ANGL', 'ART', 'AV', 'AVE', 'BD', 'BV', 'CAMP', 'CAR', 'CC', 'CD', 'CH', 'CHE', 'CHEM', 'CHS ', 'CHV', 'CITE', 'CLOS', 'COTE', 'COUR', 'CPG', 'CR', 'CRS', 'CRX', 'D', 'DIG', 'DOM', 'ECL', 'ESC', 'ESP', 'FG', 'FOS', 'FRM', 'GARE', 'GPL', 'GR', 'HAM', 'HLE', 'HLM ', 'IMP', 'JTE ', 'LOT', 'MAIL', 'MAIS', 'N', 'PARC', 'PAS', 'PCH', 'PL', 'PLE ', 'PONT', 'PORT', 'PROM', 'PRV', 'PTA', 'PTE', 'PTR', 'PTTE', 'QUA', 'QUAI', 'REM', 'RES', 'RIVE', 'RLE', 'ROC', 'RPE ', 'RPT ', 'RTE ', 'RUE', 'RULT', 'SEN', 'SQ', 'TOUR', 'TSSE', 'VAL', 'VC', 'VEN', 'VLA', 'VOIE', 'VOIR', 'VOY', 'ZONE'
-            ]
-            sp = searchValue.split(' ')
-            if len(sp)>0 and self.qc.normalizeString(sp[0]) in stopwords:
-                searchValue = ' '.join(sp[1:])
-                if len(self.qc.normalizeString(searchValue)) < minlen:
-                    self.qc.updateLog(u"%s caractères minimum requis pour la recherche !" % minlen)
-                    QApplication.restoreOverrideCursor()
-                    return None
-
-        sqlSearchValue = self.qc.normalizeString(searchValue)
-
-        # Build SQL query
-        if key == 'adresse':
-            sql = ' SELECT DISTINCT v.voie, c.libcom, v.natvoi, v.libvoi'
-            sql+= ' FROM voie v'
-            sql+= ' INNER JOIN commune c ON c.ccodep = v.ccodep AND c.ccocom = v.ccocom'
-            sql+= " WHERE libvoi LIKE %s" % self.connector.quoteString('%'+sqlSearchValue+'%')
-            sql+= ' ORDER BY c.libcom, v.natvoi, v.libvoi'
-
-        if key == 'proprietaire':
-            sql = " SELECT trim(ddenom) AS k, MyStringAgg(comptecommunal, ',') AS cc, dnuper" #, c.ccocom"
-            sql+= ' FROM proprietaire p'
-            #~ sql+= ' INNER JOIN commune c ON c.ccocom = p.ccocom'
-            sql+= " WHERE ddenom LIKE %s" % self.connector.quoteString(sqlSearchValue+'%')
-            sql+= ' GROUP BY dnuper, ddenom, dlign4' #, c.ccocom'
-            sql+= ' ORDER BY ddenom' #, c.ccocom'
-        self.dbType = connectionParams['dbType']
-        if self.dbType == 'postgis':
-            sql = cadastre_common.setSearchPath(sql, connectionParams['schema'])
-            sql = sql.replace('MyStringAgg', 'string_agg')
-        else:
-            sql = sql.replace('MyStringAgg', 'group_concat')
-        #self.qc.updateLog(sql)
-        [header, data, rowCount, ok] = cadastre_common.fetchDataFromSqlQuery(connector,sql)
-
-        # Fill  combobox
-        self.qc.updateLog(u"%s résultats correpondent à '%s'" % (rowCount, searchValue))
         cb = self.searchComboBoxes[key]['widget']
-        cb.clear()
-        cb.addItem(u'%s item(s)' % rowCount , '')
-        itemList = []
-
-        for line in data:
-            if key == 'adresse':
-                label = '%s | %s %s' % (
-                    line[1].strip(),
-                    line[2].strip(),
-                    line[3].strip()
-                )
-                val = {'voie' : line[0]}
-
-            if key == 'proprietaire':
-                #~ label = '%s - %s | %s' % (line[3], line[2], line[0].strip())
-                label = '%s | %s' % (line[2], line[0].strip())
-                val = {
-                    'cc' : ["'%s'" % a for a in line[1].split(',')],
-                    'dnuper' : line[2]
-                }
-
-            cb.addItem(label, val)
-
-        pView = cb.view()
-        pView.setMinimumWidth(pView.sizeHintForColumn(0))
-
-        # Restore cursor
-        QApplication.restoreOverrideCursor()
+        label = cb.currentText()
+        li = cb.lineEdit()
+        co = li.completer()
+        co.model().setStringList(label.split('|')[0].strip())
+        co.updateModel()
+        if label in self.searchComboBoxes[key]['foundValues']:
+            chosenValue = self.searchComboBoxes[key]['foundValues'][label]
+            self.onSearchItemChoose(key, label, chosenValue)
 
 
-    def onSearchItemChoose(self, key):
+
+    def onSearchItemChoose(self, key, label, value):
         '''
         Select parcelles corresponding
         to chosen item in combo box
@@ -1841,22 +2039,20 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
         # Get value
-        combo = self.searchComboBoxes[key]['widget']
-        value = combo.itemData(combo.currentIndex())
-
+        #combo = self.searchComboBoxes[key]['widget']
+        #value = combo.itemData(combo.currentIndex())
         if not value:
             QApplication.restoreOverrideCursor()
             return None
 
-        # Set filter expression
+        # Set filter expression for parcell child data
+        ckey = self.searchComboBoxes[key]['search']['parcelle_child']
         if key == 'adresse':
             filterExpression = "voie = '%s'" % value['voie']
 
         if key == 'proprietaire':
             filterExpression = "comptecommunal IN (%s)" % ', '.join(value['cc'])
 
-        # Get data for child and fill combobox
-        ckey = self.searchComboBoxes[key]['search']['child']
         [layer, features] = self.setupSearchCombobox(
             ckey,
             filterExpression,
@@ -1876,9 +2072,10 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
             self.qc.updateLog(
                 u"%s parcelle(s) trouvée(s) pour '%s'" % (
                     len(features),
-                    combo.currentText()
+                    label
                 )
             )
+            self.setZoomToChosenSearchCombobox(key)
 
         QApplication.restoreOverrideCursor()
 
@@ -1886,23 +2083,26 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
     def onNonSearchItemChoose(self, key):
         '''
         Get feature from chosen item in combobox
-        and optionnaly fill its child combobox
+        and optionnaly fill its children combobox
         '''
         # get feature from the chosen value
         self.getFeatureFromComboboxValue(key)
 
-        # optionnaly also update child combobox
+        # optionnaly also update children combobox
         item = self.searchComboBoxes[key]
-        if item.has_key('child'):
-            feature = item['chosenFeature']
-            ckey = item['child']['key']
-            fkey = item['child']['fkey']
-            if feature:
-                filterExpression = "%s = '%s' AND lot = '%s'" % (fkey, feature[fkey], feature['lot'])
-                self.setupSearchCombobox(ckey, filterExpression, 'sql')
-            else:
-                if item['child']['getIfNoFeature']:
-                    self.setupSearchCombobox(ckey, None, 'sql')
+        if item.has_key('children'):
+            if not isinstance(item['children'], list):
+                return
+            for child in item['children']:
+                feature = item['chosenFeature']
+                ckey = child['key']
+                fkey = child['fkey']
+                if feature:
+                    filterExpression = "%s = '%s' AND lot = '%s'" % (fkey, feature[fkey], feature['lot'])
+                    self.setupSearchCombobox(ckey, filterExpression, 'sql')
+                else:
+                    if child['getIfNoFeature']:
+                        self.setupSearchCombobox(ckey, None, 'sql')
 
 
     def onNonSearchItemEdit(self, key):
@@ -1919,7 +2119,28 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
         Unchoose item in combobox
         which also trigger onNonSearchItemChoose above
         '''
+        self.searchComboBoxes[key]['chosenFeature'] = None
         self.searchComboBoxes[key]['widget'].setCurrentIndex(0)
+
+
+    def onSearchItemReset(self, key):
+        '''
+        Unchoose item in a searchable combobox
+        which also trigger
+        '''
+        self.searchComboBoxes[key]['chosenFeature'] = None
+        self.searchComboBoxes[key]['widget'].setCurrentIndex(0)
+        self.searchComboBoxes[key]['widget'].lineEdit().selectAll()
+        self.searchComboBoxes[key]['widget'].lineEdit().setFocus()
+        self.searchComboBoxes[key]['widget'].lineEdit().setText(u'')
+
+
+    def onSearchItemFocus(self, key):
+        '''
+        Select all content on focus by click
+        '''
+        self.searchComboBoxes[key]['widget'].lineEdit().selectAll()
+        self.searchComboBoxes[key]['widget'].lineEdit().setFocus()
 
 
 
@@ -2107,11 +2328,17 @@ class cadastre_search_dialog(QDockWidget, Ui_cadastre_search_form):
 #        Option - Let the user configure options
 # --------------------------------------------------------
 
-from cadastre_option_form import *
 
-class cadastre_option_dialog(QDialog, Ui_cadastre_option_form):
-    def __init__(self, iface):
-        QDialog.__init__(self)
+from PyQt4 import uic
+OPTION_FORM_CLASS, _ = uic.loadUiType(
+    os.path.join(
+        os.path.dirname(__file__),
+        'forms/cadastre_option_form.ui'
+    )
+)
+class cadastre_option_dialog(QDialog, OPTION_FORM_CLASS):
+    def __init__(self, iface, parent=None):
+        super(cadastre_option_dialog, self).__init__(parent)
         self.iface = iface
         self.setupUi(self)
 
@@ -2296,11 +2523,17 @@ class cadastre_option_dialog(QDialog, Ui_cadastre_option_form):
 #        About - Let the user display the about dialog
 # --------------------------------------------------------
 
-from cadastre_about_form import *
 
-class cadastre_about_dialog(QDialog, Ui_cadastre_about_form):
-    def __init__(self, iface):
-        QDialog.__init__(self)
+from PyQt4 import uic
+ABOUT_FORM_CLASS, _ = uic.loadUiType(
+    os.path.join(
+        os.path.dirname(__file__),
+        'forms/cadastre_about_form.ui'
+    )
+)
+class cadastre_about_dialog(QDialog, ABOUT_FORM_CLASS):
+    def __init__(self, iface, parent=None):
+        super(cadastre_about_dialog, self).__init__(parent)
         self.iface = iface
         self.setupUi(self)
 
@@ -2327,12 +2560,22 @@ class cadastre_about_dialog(QDialog, Ui_cadastre_about_form):
 #        Parcelle - Show parcelle information
 # --------------------------------------------------------
 
-from cadastre_parcelle_form import *
-from cadastre_export import *
 
-class cadastre_parcelle_dialog(QDialog, Ui_cadastre_parcelle_form):
-    def __init__(self, iface, layer, feature, cadastre_search_dialog):
-        QDialog.__init__(self)
+from cadastre_export import cadastreExport
+try:
+    from cadastre_export import cadastrePrintProgress
+except:
+    pass
+from PyQt4 import uic
+PARCELLE_FORM_CLASS, _ = uic.loadUiType(
+    os.path.join(
+        os.path.dirname(__file__),
+        'forms/cadastre_parcelle_form.ui'
+    )
+)
+class cadastre_parcelle_dialog(QDialog, PARCELLE_FORM_CLASS):
+    def __init__(self, iface, layer, feature, cadastre_search_dialog, parent=None):
+        super(cadastre_parcelle_dialog, self).__init__(parent)
         self.iface = iface
         self.feature = feature
         self.layer = layer
@@ -2476,7 +2719,7 @@ class cadastre_parcelle_dialog(QDialog, Ui_cadastre_parcelle_form):
         SELECT coalesce(ccodro_lib, '') || ' - ' || p.dnuper || ' - ' || trim(coalesce(p.dqualp, '')) || ' ' || trim(coalesce(p.ddenom, '')) || ' - ' ||trim(coalesce(p.dlign3, '')) || ' / ' || ltrim(trim(coalesce(p.dlign4, '')), '0') || trim(coalesce(p.dlign5, '')) || ' ' || trim(coalesce(p.dlign6, '')) ||
         CASE
           WHEN jdatnss IS NOT NULL
-          THEN ' - Né(e) le ' || coalesce(to_char(jdatnss, 'dd/mm/YYYY'), '') || ' à ' || coalesce(p.dldnss, '')
+          THEN ' - Né(e) le ' || jdatnss || ' à ' || coalesce(p.dldnss, '')
           ELSE ''
         END
         FROM proprietaire p
@@ -2600,8 +2843,8 @@ class cadastre_parcelle_dialog(QDialog, Ui_cadastre_parcelle_form):
         value = comptecommunal
         filterExpression = "comptecommunal IN ('%s')" % value
 
-        # Get data for child and fill combobox
-        ckey = qs.searchComboBoxes[key]['search']['child']
+        # Get data for child parcelle combo and fill it
+        ckey = qs.searchComboBoxes[key]['search']['parcelle_child']
         [layer, features] = qs.setupSearchCombobox(
             ckey,
             filterExpression,
@@ -2636,11 +2879,16 @@ class cadastre_parcelle_dialog(QDialog, Ui_cadastre_parcelle_form):
 #        Messages - Displays a message to the user
 # --------------------------------------------------------
 
-from cadastre_message_form import *
-
-class cadastre_message_dialog(QDialog, Ui_cadastre_message_form):
-    def __init__(self, iface, message):
-        QDialog.__init__(self)
+from PyQt4 import uic
+MESSAGE_FORM_CLASS, _ = uic.loadUiType(
+    os.path.join(
+        os.path.dirname(__file__),
+        'forms/cadastre_message_form.ui'
+    )
+)
+class cadastre_message_dialog(QDialog, MESSAGE_FORM_CLASS):
+    def __init__(self, iface, message, parent=None):
+        super(cadastre_message_dialog, self).__init__(parent)
         self.iface = iface
         self.setupUi(self)
 
