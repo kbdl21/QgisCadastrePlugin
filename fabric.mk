@@ -12,7 +12,7 @@ main:
 	echo "Makefile for packaging infra components: select a task"
 
 PACKAGE=qgis_cadastre
-FILES = composers filters forms icons interface scripts styles templates *.py *.qrc icon.png metadata.txt README.md LICENSE
+FILES = composers filters forms icons interface scripts styles templates *.py *.qrc icon.png metadata.txt README.md
 
 
 build/cadastre:
